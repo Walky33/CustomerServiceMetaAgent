@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meta-Agent for CS AI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background: #f5f7fb;
+            color: #1f2937;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        h1 { margin-bottom: 8px; }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+        }
+        textarea, input, select, button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 8px;
+            margin-bottom: 12px;
+            border-radius: 10px;
+            border: 1px solid #d1d5db;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover { background: #1d4ed8; }
+        .list {
+            max-height: 320px;
+            overflow: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 10px;
+            background: #fafafa;
+        }
+        .item {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px 0;
+        }
+        .item:last-child { border-bottom: none; }
+        .muted { color: #6b7280; font-size: 13px; }
+        .answer {
+            white-space: pre-wrap;
+            background: #eff6ff;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #bfdbfe;
+        }
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Meta-Agent for Customer Service AI</h1>
+    <p class="muted">Upload knowledge, chat with the agent, report mistakes, and apply auto-fixes.</p>
+
+    <div class="grid">
+        <div class="card">
+            <h2>1. Add Knowledge Document</h2>
+            <input id="docTitle" placeholder="Document title">
+            <textarea id="docContent" rows="7" placeholder="Paste your support policy, FAQ, SOP, or instruction here"></textarea>
+            <button onclick="addDocument()">Save Document</button>
+            <h3>Knowledge Base</h3>
+            <div id="documents" class="list"></div>
+        </div>
+
+        <div class="card">
+            <h2>2. Create Agent</h2>
+
+            <input id="agentName" placeholder="Agent name" />
+            <textarea id="agentInstructions" placeholder="Instructions for the agent"></textarea>
+
+            <button onclick="createAgent()">Create Agent</button>
+
+            <div class="muted" style="margin-top:10px;">
+                Current Agent ID: <span id="currentAgentId">None</span>
+            </div>
+
+            <div id="agents" style="margin-top:15px;"></div>
+        </div>
+
+        <div class="card">
+            <h2>3. Chat with Agent</h2>
+            <textarea id="question" rows="4" placeholder="Ask a support question"></textarea>
+            <button onclick="askQuestion()">Ask</button>
+            <div id="answer" class="answer">No response yet.</div>
+        </div>
+
+        <div class="card">
+            <h2>4. Submit Feedback</h2>
+            <input id="agentId" placeholder="Agent ID">
+            <input id="conversationId" placeholder="Conversation ID">
+            <textarea id="fbQuestion" rows="3" placeholder="Question that was asked"></textarea>
+            <textarea id="wrongAnswer" rows="4" placeholder="Wrong answer given by chatbot"></textarea>
+            <textarea id="correctAnswer" rows="4" placeholder="Correct answer"></textarea>
+            <select id="issueType">
+                <option value="WRONG_ANSWER">WRONG_ANSWER</option>
+                <option value="POLICY_VIOLATION">POLICY_VIOLATION</option>
+                <option value="MISSING_KNOWLEDGE">MISSING_KNOWLEDGE</option>
+            </select>
+            <button onclick="submitFeedback()">Submit Feedback</button>
+        </div>
+
+        <div class="card">
+            <h2>5. Feedback Reports / AutoFix</h2>
+            <button onclick="loadFeedback()">Refresh Reports</button>
+            <div id="feedbackList" class="list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentAgentId = null;
+    let currentConversationId = null;
+    async function api(url, method = 'GET', body = null) {
+        const options = {
+            method,
+            headers: {}
+        };
+
+        if (body) {
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
+        }
+
+        const response = await fetch(url, options);
+
+        const text = await response.text();
+
+        if (!response.ok) {
+            throw new Error(text || `HTTP ${response.status}`);
+        }
+
+        return text ? JSON.parse(text) : null;
+    }
+
+    async function addDocument() {
+    try {
+
+        if (!currentAgentId) {
+            alert('Please create or select an agent first');
+            return;
+        }
+
+        const content = document.getElementById('docContent').value;
+
+        const blob = new Blob([content], { type: "text/plain" });
+
+        const formData = new FormData();
+        formData.append("file", blob, "document.txt");
+
+        const response = await fetch(`/api/agents/${currentAgentId}/documents`, {
+            method: "POST",
+            body: formData
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(err);
+        }
+
+        document.getElementById('docTitle').value = '';
+        document.getElementById('docContent').value = '';
+
+        await loadDocuments();
+
+        alert("Document saved");
+
+        } catch (e) {
+        alert('Error: ' + e.message);
+        }
+    }
+
+    async function loadDocuments() {
+    if (!currentAgentId) {
+            alert('Please create or select an agent first');
+            return;
+    }
+    const docs = await api(`/api/agents/${currentAgentId}/documents`);
+    const container = document.getElementById('documents');
+
+    container.innerHTML = docs.map(d => `
+        <div class="item">
+            <strong>${escapeHtml(d.fileName || '')}</strong>
+            <div class="muted">${d.uploadedAt ? new Date(d.uploadedAt).toLocaleString() : ''}</div>
+            <div>${escapeHtml((d.content || '').slice(0, 180))}${(d.content || '').length > 180 ? '...' : ''}</div>
+        </div>
+    `).join('') || '<div class="muted">No documents yet.</div>';
+    }
+
+    async function createAgent() {
+    try {
+        const name = document.getElementById('agentName').value.trim();
+        const instructions = document.getElementById('agentInstructions').value.trim();
+
+        if (!name) {
+            alert('Agent name is required');
+            return;
+        }
+
+        const agent = await api('/api/agents', 'POST', {
+            name,
+            instructions
+        });
+
+        currentAgentId = agent.id;
+        document.getElementById('currentAgentId').textContent = currentAgentId;
+
+        document.getElementById('agentName').value = '';
+        document.getElementById('agentInstructions').value = '';
+
+        await loadAgents();
+        alert('Agent created');
+        } catch (e) {
+        alert('Error: ' + e.message);
+        }
+    }
+
+    async function loadAgents() {
+    try {
+        const agents = await api('/api/agents');
+        const container = document.getElementById('agents');
+
+        container.innerHTML = agents.map(a => `
+            <div class="item" style="margin-bottom:10px; padding:10px; border:1px solid #ddd;">
+                <strong>${escapeHtml(a.name || '')}</strong>
+                <div class="muted">${escapeHtml(a.id || '')}</div>
+                <div>${escapeHtml(a.instructions || '')}</div>
+                <button onclick="selectAgent('${a.id}')">Use this agent</button>
+            </div>
+        `).join('') || '<div class="muted">No agents yet.</div>';
+        } catch (e) {
+            console.error(e);
+            document.getElementById('agents').innerHTML =
+            '<div class="muted">Could not load agents.</div>';
+       }
+    }
+
+
+    async function askQuestion() {
+        try {
+            if (!currentAgentId) {
+                alert('Please create or select an agent first');
+                return;
+            }
+            if (!currentConversationId) {
+                currentConversationId = generateConversationId();
+            }
+            const question = document.getElementById('question').value;
+
+            const result = await api(`/api/agents/${currentAgentId}/chat`, 'POST', { question,
+                                                                               conversationId: currentConversationId });
+            document.getElementById('answer').textContent = result.answer + '\n\nSource: ' + result.source;
+            document.getElementById('fbQuestion').value = question;
+            document.getElementById('wrongAnswer').value = result.answer;
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    async function submitFeedback() {
+        try {
+            if (!currentConversationId) {
+                currentConversationId = generateConversationId();
+            }
+            await api(`/api/agents/${currentAgentId}/feedback`, 'POST', {
+                conversationId: currentConversationId,
+                question: document.getElementById('fbQuestion').value,
+                wrongAnswer: document.getElementById('wrongAnswer').value,
+                correctAnswer: document.getElementById('correctAnswer').value,
+                issueType: document.getElementById('issueType').value,
+            });
+            await loadFeedback();
+            alert('Feedback saved');
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    async function loadFeedback() {
+        const items = await api(`/api/agents/${currentAgentId}/feedback`);
+        const container = document.getElementById('feedbackList');
+        container.innerHTML = items.map(item => `
+            <div class="item">
+                <div><strong>${escapeHtml(item.issueType)}</strong></div>
+                <div><strong>Question:</strong> ${escapeHtml(item.question || '')}</div>
+                <div><strong>Wrong:</strong> ${escapeHtml(item.wrongAnswer || '')}</div>
+                <div><strong>Correct:</strong> ${escapeHtml(item.correctAnswer || '')}</div>
+                <button onclick="applyFix('${item.id}', ${JSON.stringify(item.correctAnswer || '').replace(/"/g, '&quot;')})">Apply AutoFix</button>
+            </div>
+        `).join('') || '<div class="muted">No feedback reports yet.</div>';
+    }
+
+    async function applyFix(id) {
+        try {
+            await api('/api/reports/' + id + '/autofix', 'POST', {});
+            await loadFeedback();
+            alert('Auto-fix applied. Ask the same question again in Chat.');
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    function selectAgent(agentId) {
+        currentAgentId = agentId;
+        currentConversationId = null;
+        document.getElementById('currentAgentId').textContent = currentAgentId;
+        loadDocuments();
+        loadFeedback();
+    }
+
+    function generateConversationId() {
+        return crypto.randomUUID ? crypto.randomUUID() : 'conv-' + Date.now();
+    }
+
+    function escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    window.onload = async function () {
+        await loadAgents();
+    };
+
+</script>
+</body>
+</html>
